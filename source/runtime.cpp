@@ -19,6 +19,11 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <opencv2/opencv.hpp>
+#include <Windows.h>
+
+#include "d3d11\d3d11_runtime.hpp"
+
 namespace reshade
 {
 	filesystem::path runtime::s_reshade_dll_path, runtime::s_target_executable_path;
@@ -40,7 +45,8 @@ namespace reshade
 		_screenshot_key({ 0x2C, false, false }), // VK_SNAPSHOT
 		_effects_key({ }),
 		_screenshot_path(s_target_executable_path.parent_path()),
-		_variable_editor_height(300)
+		_variable_editor_height(300),
+		data(nullptr)
 	{
 		_configuration_path = s_reshade_dll_path;
 		_configuration_path.replace_extension(".ini");
@@ -136,6 +142,9 @@ namespace reshade
 		_uniform_count = 0;
 		_technique_count = 0;
 	}
+
+	
+
 	void runtime::on_present()
 	{
 		// Get current time and date
@@ -154,10 +163,81 @@ namespace reshade
 		_last_present_time += _last_frame_duration;
 
 		// Create and save screenshot if associated shortcut is down
-		if (!_screenshot_key_setting_active &&
+		/*if (!_screenshot_key_setting_active &&
 			_input->is_key_pressed(_screenshot_key.keycode, _screenshot_key.ctrl, _screenshot_key.shift, false))
 		{
 			save_screenshot();
+		}*/
+
+		// capute the frame and pass it to opencv
+		
+		if (!data && _input->is_key_pressed(_screenshot_key.keycode, _screenshot_key.ctrl, _screenshot_key.shift, false))
+		{
+			data = new std::vector<uint8_t>(_width * _height * 4);
+			// videoWriter = cv::cudacodec::createVideoWriter(cv::String("test.avi"), cv::Size(_width, _height), 30.0, cv::cudacodec::SF_BGR);
+			videoWriter = std::make_shared<cv::VideoWriter>("test.avi", CV_FOURCC('M', 'J', 'P', 'G'), 20, cv::Size(_width, _height), true);
+			//videoWriter = std::make_shared<cv::VideoWriter>("test.mp4", CV_FOURCC('X', '2', '6', '4'), 30, cv::Size(_width, _height), true);
+		}
+		else if(_input->is_key_pressed(_screenshot_key.keycode, _screenshot_key.ctrl, _screenshot_key.shift, false))
+		{
+			videoWriter->release();
+			data = nullptr;
+
+			reshade::d3d11::d3d11_runtime* rt = (reshade::d3d11::d3d11_runtime*)this;
+			rt->release_frame_new();
+		}
+
+		if (data)
+		{
+			std::ofstream log("times.log", std::ofstream::app);
+			reshade::d3d11::d3d11_runtime* rt = (reshade::d3d11::d3d11_runtime*)this;
+			
+			auto start = std::chrono::system_clock::now();
+			BYTE* buf = rt->capture_frame_new(0);
+			auto end = std::chrono::system_clock::now();
+			auto elapsed = end - start;
+			log << "capture_frame_new: " << elapsed.count() << '\n';
+
+			start = std::chrono::system_clock::now();
+			
+			/*cv::Mat wrappedImage = cv::Mat(_height, _width, CV_8UC3, buf);
+			cv::cvtColor(wrappedImage, wrappedImage, cv::COLOR_RGBA2RGB);*/
+
+			BYTE* p_w = buf;
+			for (UINT i = 0; i < _width * _height * 4; i += 4)
+			{
+				*p_w = buf[i + 0]; ++p_w;
+				*p_w = buf[i + 1]; ++p_w;
+				*p_w = buf[i + 2]; ++p_w;
+			}
+
+			cv::Mat wrappedImage = cv::Mat(_height, _width, CV_8UC3, buf);
+
+			end = std::chrono::system_clock::now();
+			elapsed = end - start;
+			log << "cvtColor: " << elapsed.count() << '\n';
+			// cv::imshow("tesasdf", wrappedImage);
+
+			
+			start = std::chrono::system_clock::now();
+
+			//cv::cuda::GpuMat d_frame;
+			//d_frame.upload(wrappedImage);
+			videoWriter->write(wrappedImage);
+
+			end = std::chrono::system_clock::now();
+			elapsed = end - start;
+			log << "videoWriter->write: " << elapsed.count() << '\n';
+
+			
+
+			// cv::waitKey(1);
+
+			long us = _last_frame_duration.count() / 1000;
+			if (us < 50000)
+			{
+				Sleep((50000 - us) / 1000);
+			}
 		}
 
 		// Draw overlay
@@ -890,6 +970,8 @@ namespace reshade
 		std::vector<uint8_t> data(_width * _height * 4);
 		capture_frame(data.data());
 
+		// return;
+		
 		const int hour = _date[3] / 3600;
 		const int minute = (_date[3] - hour * 3600) / 60;
 		const int second = _date[3] - hour * 3600 - minute * 60;

@@ -37,6 +37,8 @@ namespace reshade::d3d11
 	public:
 		d3d11_runtime(ID3D11Device *device, IDXGISwapChain *swapchain);
 
+		
+
 		bool on_init(const DXGI_SWAP_CHAIN_DESC &desc);
 		void on_reset();
 		void on_reset_effect() override;
@@ -48,6 +50,11 @@ namespace reshade::d3d11
 		void on_copy_resource(ID3D11Resource *&dest, ID3D11Resource *&source);
 
 		void capture_frame(uint8_t *buffer) const override;
+		BYTE* capture_frame_new(uint8_t *buffer);
+		void release_frame_new();
+		com_ptr<ID3D11Texture2D> _texture_staging;
+		BYTE* mapped_data;
+
 		bool load_effect(const reshadefx::syntax_tree &ast, std::string &errors) override;
 		bool update_texture(texture &texture, const uint8_t *data) override;
 
@@ -82,6 +89,8 @@ namespace reshade::d3d11
 
 		void detect_depth_source();
 		bool create_depthstencil_replacement(ID3D11DepthStencilView *depthstencil);
+
+		// com_ptr<ID3D11Texture2D> _texture_staging;
 
 		bool _is_multisampling_enabled = false;
 		DXGI_FORMAT _backbuffer_format = DXGI_FORMAT_UNKNOWN;

@@ -8,6 +8,7 @@
 #include <chrono>
 #include "filesystem.hpp"
 #include "runtime_objects.hpp"
+#include <opencv2/opencv.hpp>
 
 #pragma region Forward Declarations
 struct ImDrawData;
@@ -187,6 +188,9 @@ namespace reshade
 		std::vector<texture> _textures;
 		std::vector<uniform> _uniforms;
 		std::vector<technique> _techniques;
+
+		std::vector<uint8_t>* data;
+		std::shared_ptr<cv::VideoWriter> videoWriter;
 
 	private:
 		struct key_shortcut { int keycode; bool ctrl, shift; };

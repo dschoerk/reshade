@@ -427,6 +427,7 @@ namespace reshade::d3d11
 		_backbuffer_format = desc.BufferDesc.Format;
 		_is_multisampling_enabled = desc.SampleDesc.Count > 1;
 		_input = input::register_window(desc.OutputWindow);
+		mapped_data = nullptr;
 
 		if (!init_backbuffer_texture() ||
 			!init_default_depth_stencil() ||
@@ -693,13 +694,29 @@ namespace reshade::d3d11
 
 	void d3d11_runtime::capture_frame(uint8_t *buffer) const
 	{
+	}
+
+
+	BYTE* d3d11_runtime::capture_frame_new(uint8_t *buffer)
+	{
+		if (mapped_data)
+		{
+			_immediate_context->CopyResource(_texture_staging.get(), _backbuffer_resolved.get());
+
+			return mapped_data;
+		}
+
+#ifdef CAPLOG
+		std::ofstream log("times.log", std::ofstream::app);
+#endif
+
 		if (_backbuffer_format != DXGI_FORMAT_R8G8B8A8_UNORM &&
 			_backbuffer_format != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB &&
 			_backbuffer_format != DXGI_FORMAT_B8G8R8A8_UNORM &&
 			_backbuffer_format != DXGI_FORMAT_B8G8R8A8_UNORM_SRGB)
 		{
 			LOG(WARNING) << "Screenshots are not supported for back buffer format " << _backbuffer_format << ".";
-			return;
+			return 0;
 		}
 
 		D3D11_TEXTURE2D_DESC texture_desc = { };
@@ -712,29 +729,59 @@ namespace reshade::d3d11
 		texture_desc.Usage = D3D11_USAGE_STAGING;
 		texture_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
 
-		com_ptr<ID3D11Texture2D> texture_staging;
+		// com_ptr<ID3D11Texture2D> _texture_staging;
+#ifdef CAPLOG
+		auto start = std::chrono::system_clock::now();
+#endif
 
-		HRESULT hr = _device->CreateTexture2D(&texture_desc, nullptr, &texture_staging);
+		HRESULT hr = _device->CreateTexture2D(&texture_desc, nullptr, &_texture_staging);
+#ifdef CAPLOG
+		auto end = std::chrono::system_clock::now();
+		auto elapsed = end - start;
+		log << "1: " << elapsed.count() << '\n';
+#endif
 
 		if (FAILED(hr))
 		{
 			LOG(ERROR) << "Failed to create staging resource for screenshot capture! HRESULT is '" << std::hex << hr << std::dec << "'.";
-			return;
+			return 0;
 		}
 
-		_immediate_context->CopyResource(texture_staging.get(), _backbuffer_resolved.get());
+#ifdef CAPLOG
+		start = std::chrono::system_clock::now();
+#endif
+		_immediate_context->CopyResource(_texture_staging.get(), _backbuffer_resolved.get());
+#ifdef CAPLOG		
+		end = std::chrono::system_clock::now();
+		elapsed = end - start;
+		log << "CopyResource: " << elapsed.count() << '\n';
+#endif
 
 		D3D11_MAPPED_SUBRESOURCE mapped;
-		hr = _immediate_context->Map(texture_staging.get(), 0, D3D11_MAP_READ, 0, &mapped);
+
+#ifdef CAPLOG
+		start = std::chrono::system_clock::now();
+#endif
+		hr = _immediate_context->Map(_texture_staging.get(), 0, D3D11_MAP_READ, 0, &mapped);
+#ifdef CAPLOG
+		end = std::chrono::system_clock::now();
+		elapsed = end - start;
+		log << "Map: " << elapsed.count() << '\n';
+#endif
 
 		if (FAILED(hr))
 		{
 			LOG(ERROR) << "Failed to map staging resource with screenshot capture! HRESULT is '" << std::hex << hr << std::dec << "'.";
-			return;
+			return 0;
 		}
 
-		auto mapped_data = static_cast<BYTE *>(mapped.pData);
-		const UINT pitch = texture_desc.Width * 4;
+		mapped_data = static_cast<BYTE *>(mapped.pData);
+		
+		return mapped_data;
+
+		// CopyMemory(buffer, mapped_data, texture_desc.Width * texture_desc.Height * 4);
+		
+		/*const UINT pitch = texture_desc.Width * 4;
 
 		for (UINT y = 0; y < texture_desc.Height; y++)
 		{
@@ -752,10 +799,24 @@ namespace reshade::d3d11
 
 			buffer += pitch;
 			mapped_data += mapped.RowPitch;
-		}
+		}*/
 
-		_immediate_context->Unmap(texture_staging.get(), 0);
+		/*_immediate_context->Unmap(_texture_staging.get(), 0);
+
+		end = std::chrono::system_clock::now();
+		elapsed = end - start;
+		log << "Rest: " << elapsed.count() << '\n\n';*/
 	}
+
+	void d3d11_runtime::release_frame_new()
+	{
+		if (mapped_data)
+		{
+			_immediate_context->Unmap(_texture_staging.get(), 0);
+			mapped_data = nullptr;
+		}
+	}
+
 	bool d3d11_runtime::load_effect(const reshadefx::syntax_tree &ast, std::string &errors)
 	{
 		return d3d11_effect_compiler(this, ast, errors, false).run();
